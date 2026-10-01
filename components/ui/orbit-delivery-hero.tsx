@@ -1000,12 +1000,49 @@ var SceneBoundary = class extends Component {
 var stories = {
   "How it works": { title: "From your doorstep to theirs.", paragraphs: ["Every delivery begins with something worth sending. Pack it with care, choose its destination, and let the journey begin.", "Our little courier brings that journey to life. Turn the globe and watch him find his way."] },
   "For business": { title: "Your business. On the move.", paragraphs: ["Orders heading out. Supplies coming in. A thoughtful delivery experience connects both sides of your business.", "Orbit Delivery puts the people behind every parcel at the heart of the journey."] },
-  "Our story": { title: "Every parcel brings us closer.", paragraphs: ["A gift for someone far away. An order someone has been waiting for. An everyday essential, right at the door.", "Orbit Delivery is built around a simple idea: what we carry matters, and so does how we get it there."] }
+  "Our story": { title: "Every parcel brings us closer.", paragraphs: ["A gift for someone far away. An order someone has been waiting for. An everyday essential, right at the door.", "Orbit Delivery is built around a simple idea: what we carry matters, and so does how we get it there."] },
+  "Meet your courier": { title: "Meet Orion, your planetary courier.", paragraphs: ["Carrying care across every coordinate. Orion navigates planetary rotation in a steady, continuous stride so good things always arrive with care.", "Drag anywhere on the globe to guide his course, or press Space anytime to pause the world and say hello."] }
 };
-function App() {
+function playSubtlePop() {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.frequency.setValueAtTime(540, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(840, ctx.currentTime + 0.04);
+    gain.gain.setValueAtTime(0.04, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.05);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.06);
+  } catch {}
+}
+function playSubtleWhoosh(speed = 1) {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const filter = ctx.createBiquadFilter();
+    filter.type = "bandpass";
+    filter.frequency.setValueAtTime(280, ctx.currentTime);
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(140, ctx.currentTime);
+    gain.gain.setValueAtTime(0.018 * Math.min(speed, 2), ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.16);
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.18);
+  } catch {}
+}
+function App({ initialTheme = "light" }) {
   const motion = useRef5(createMotion());
   const interaction = useRef5(null);
   const drag = useRef5(null);
+  const [theme, setTheme] = useState4(initialTheme);
+  const [soundOn, setSoundOn] = useState4(false);
   const [visible, setVisible] = useState4(true), [tabVisible, setTabVisible] = useState4(true);
   const [reduced, setReduced] = useState4(false);
   const [sceneMounted, setSceneMounted] = useState4(false);
@@ -1058,6 +1095,7 @@ function App() {
   const toggleMotion = () => {
     const next = !auto;
     setAuto(next);
+    if (soundOn) playSubtlePop();
     const m = motion.current;
     m.dragging = false;
     if (drag.current && interaction.current?.hasPointerCapture(drag.current.id)) interaction.current.releasePointerCapture(drag.current.id);
@@ -1067,6 +1105,11 @@ function App() {
     m.dragTarget = m.planetAngle;
     m.pitchTarget = m.pitchAngle;
     if (next) m.lastInteraction = m.time - 4;
+  };
+  const meetCourier = () => {
+    if (soundOn) playSubtlePop();
+    setStory("Meet your courier");
+    if (auto) toggleMotion();
   };
   const nudge = (direction) => {
     if (!auto) return;
@@ -1078,81 +1121,124 @@ function App() {
     if (window.innerWidth < 760) interaction.current?.scrollIntoView({ behavior: reduced ? "instant" : "smooth", block: "center" });
     if (!reduced) nudge(1);
   };
-  return <div className={`page ${prototype ? "prototype" : ""}`}>
-    <header className="site-header">
-      <a href="./" className="wordmark" aria-label="Orbit Delivery home"><svg viewBox="0 0 38 38" aria-hidden="true"><defs><radialGradient id="logo-light" cx="30%" cy="20%"><stop stopColor="#7d9efa" /><stop offset="1" stopColor="#4674e9" /></radialGradient></defs><circle cx="23" cy="15" r="14" fill="url(#logo-light)" /><circle cx="10" cy="27" r="8" fill="#6389f0" /><circle cx="15" cy="8" r="3.5" fill="#b2c7ff" opacity=".45" /></svg><span className="brand-type">orbit<small>delivery</small></span></a>
-      <nav aria-label="Main navigation"><button onClick={explore}>Delivery</button>{["How it works", "For business", "Our story"].map((item) => <button key={item} onClick={() => setStory(item)}>{item}</button>)}</nav>
-      <button className="header-cta" disabled>Meet your courier</button>
-    </header>
-    <main><section className="hero" aria-labelledby="hero-title">
-      <div className="hero-copy">
-        <p className="eyebrow">Good things, on their way</p>
-        <h1 id="hero-title">Good things.<br />Delivered<br /><em>with care.</em></h1>
-        <p className="hero-description">Parcels, packages, and a little peace of mind.<br className="desktop-break" /> From your doorstep to theirs.</p>
-        <button className="explore-button" disabled>Meet your courier <Arrow /></button>
-      </div>
-      <div className="visual-column">
-        <div
-    ref={interaction}
-    id="planet"
-    className={`planet-stage ${dragging ? "dragging" : ""}`}
-    tabIndex={0}
-    role="group"
-    aria-roledescription="interactive 3D planet"
-    aria-label="Rotate the planet"
-    aria-describedby="planet-instructions"
-    onPointerDown={(event) => {
-      if (!auto || !event.isPrimary || event.button !== 0) return;
-      event.currentTarget.setPointerCapture(event.pointerId);
-      drag.current = { id: event.pointerId, x: event.clientX, y: event.clientY };
-      const m = motion.current;
-      m.dragTarget = m.planetAngle;
-      m.pitchTarget = m.pitchAngle;
-      m.dragging = true;
-      m.lastInteraction = m.time;
-      setDragging(true);
-    }}
-    onPointerMove={(event) => {
-      if (!auto || drag.current?.id !== event.pointerId) return;
-      const dx = event.clientX - drag.current.x, dy = event.clientY - drag.current.y;
-      const sensitivity = 5 / Math.max(360, event.currentTarget.clientWidth);
-      const m = motion.current;
-      m.dragTarget = Math.max(m.planetAngle - 0.5, Math.min(m.planetAngle + 0.5, m.dragTarget + dx * sensitivity));
-      m.pitchTarget = Math.max(m.pitchAngle - 0.4, Math.min(m.pitchAngle + 0.4, m.pitchTarget + dy * sensitivity * 0.7));
-      drag.current.x = event.clientX;
-      drag.current.y = event.clientY;
-      m.lastInteraction = m.time;
-    }}
-    onPointerUp={(event) => release(event.pointerId)}
-    onPointerCancel={(event) => release(event.pointerId)}
-    onLostPointerCapture={(event) => release(event.pointerId)}
-    onKeyDown={(event) => {
-      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-        event.preventDefault();
-        nudge(event.key === "ArrowRight" ? 1 : -1);
-      }
-      if (auto && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
-        event.preventDefault();
-        motion.current.pitchVelocity += event.key === "ArrowDown" ? 0.4 : -0.4;
-        motion.current.lastInteraction = motion.current.time;
-      }
-      if (event.key === " ") {
-        event.preventDefault();
-        if (!event.repeat) toggleMotion();
-      }
-    }}
-  >
-          {sceneMounted && <SceneBoundary><Suspense fallback={null}><PlanetScene3 motion={motion} active={visible && tabVisible && !story} auto={auto} reduced={reduced} prototype={prototype} onReady={setReady} /></Suspense></SceneBoundary>}
-          {!ready && <div className="loading" role="status"><span />Your little world is taking shape…</div>}
+  return <div className="orbit-delivery" data-theme={theme}>
+    <div className={`page ${prototype ? "prototype" : ""}`}>
+      <header className="site-header">
+        <a href="./" className="wordmark" aria-label="Orbit Delivery home"><svg viewBox="0 0 38 38" aria-hidden="true"><defs><radialGradient id="logo-light" cx="30%" cy="20%"><stop stopColor="#7d9efa" /><stop offset="1" stopColor="#4674e9" /></radialGradient></defs><circle cx="23" cy="15" r="14" fill="url(#logo-light)" /><circle cx="10" cy="27" r="8" fill="#6389f0" /><circle cx="15" cy="8" r="3.5" fill="#b2c7ff" opacity=".45" /></svg><span className="brand-type">orbit<small>delivery</small></span></a>
+        <nav aria-label="Main navigation"><button onClick={explore}>Delivery</button>{["How it works", "For business", "Our story"].map((item) => <button key={item} onClick={() => setStory(item)}>{item}</button>)}</nav>
+        <div className="header-actions">
+          <button
+            className="header-icon-btn"
+            onClick={() => {
+              const next = theme === "dark" ? "light" : "dark";
+              setTheme(next);
+              if (soundOn) playSubtlePop();
+            }}
+            aria-label={theme === "dark" ? "Switch to daylight" : "Switch to celestial dark mode"}
+            title={theme === "dark" ? "Switch to daylight" : "Switch to celestial dark mode"}
+          >
+            {theme === "dark" ? (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="18" height="18"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+            ) : (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="18" height="18"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+            )}
+          </button>
+          <button
+            className={`header-icon-btn ${soundOn ? "is-active" : ""}`}
+            onClick={() => {
+              const next = !soundOn;
+              setSoundOn(next);
+              if (next) playSubtlePop();
+            }}
+            aria-label={soundOn ? "Mute audio" : "Enable atmospheric 3D audio"}
+            title={soundOn ? "Mute audio" : "Enable atmospheric 3D audio"}
+          >
+            {soundOn ? (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="18" height="18"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+            ) : (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="18" height="18"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
+            )}
+          </button>
+          <button className="header-cta" onClick={meetCourier}>Meet your courier</button>
         </div>
-      </div>
-      <div className={`planet-caption ${dragging ? "is-dragging" : ""}`} aria-hidden="true"><p>{!auto ? "Press Start" : dragging ? "Good things." : "Drag to turn"}<br />{!auto ? "to keep moving" : dragging ? "On their way." : "the world"}</p><svg viewBox="0 0 180 165" fill="none"><path d="M161 148C137 82 103 39 28 14m0 0 6 16m-6-16 19-2" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round" /></svg></div>
-      <p id="planet-instructions" className="sr-only">Drag in any direction, or use the arrow keys, to rotate the 3D planet. Space pauses the planet and lets the courier wave; press again to start. Rotation is locked while paused. On touch screens, swipe outside the planet to scroll the page.</p>
-      <div className="cloud-bank" aria-hidden="true"><i /><i /><i /><i /><i /></div>
-    </section></main>
-    <footer className="site-footer"><p className="footer-left">Small parcels<br />Big possibilities</p><button className="motion-button" onClick={toggleMotion} aria-pressed={!auto} aria-label={auto ? "Pause and greet the courier" : "Start moving"}>{auto ? <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7 5v10m6-10v10" stroke="currentColor" strokeWidth="1.5" /></svg> : <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m7 4 8 6-8 6Z" fill="currentColor" /></svg>}<span>{auto ? "Pause" : "Start"}</span></button><p className="footer-right">A little<br />closer<br />to you</p></footer>
-    {prototype && <aside className="prototype-label">Movement prototype <a href="./">View finished scene ↗</a></aside>}
-    {story && <StoryDialog story={story} onClose={() => setStory(null)} />}
+      </header>
+      <main><section className="hero" aria-labelledby="hero-title">
+        <div className="hero-copy">
+          <p className="eyebrow">Good things, on their way</p>
+          <h1 id="hero-title">Good things.<br />Delivered<br /><em>with care.</em></h1>
+          <p className="hero-description">Parcels, packages, and a little peace of mind.<br className="desktop-break" /> From your doorstep to theirs.</p>
+          <button className="explore-button" onClick={meetCourier}>Meet your courier <Arrow /></button>
+        </div>
+        <div className="visual-column">
+          <div
+      ref={interaction}
+      id="planet"
+      className={`planet-stage ${dragging ? "dragging" : ""}`}
+      tabIndex={0}
+      role="group"
+      aria-roledescription="interactive 3D planet"
+      aria-label="Rotate the planet"
+      aria-describedby="planet-instructions"
+      onPointerDown={(event) => {
+        if (!auto || !event.isPrimary || event.button !== 0) return;
+        event.currentTarget.setPointerCapture(event.pointerId);
+        drag.current = { id: event.pointerId, x: event.clientX, y: event.clientY };
+        const m = motion.current;
+        m.dragTarget = m.planetAngle;
+        m.pitchTarget = m.pitchAngle;
+        m.dragging = true;
+        m.lastInteraction = m.time;
+        setDragging(true);
+      }}
+      onPointerMove={(event) => {
+        if (!auto || drag.current?.id !== event.pointerId) return;
+        const dx = event.clientX - drag.current.x, dy = event.clientY - drag.current.y;
+        if (soundOn && Math.hypot(dx, dy) > 16) {
+          playSubtleWhoosh(Math.hypot(dx, dy) * 0.04);
+        }
+        const sensitivity = 5 / Math.max(360, event.currentTarget.clientWidth);
+        const m = motion.current;
+        m.dragTarget = Math.max(m.planetAngle - 0.5, Math.min(m.planetAngle + 0.5, m.dragTarget + dx * sensitivity));
+        m.pitchTarget = Math.max(m.pitchAngle - 0.4, Math.min(m.pitchAngle + 0.4, m.pitchTarget + dy * sensitivity * 0.7));
+        drag.current.x = event.clientX;
+        drag.current.y = event.clientY;
+        m.lastInteraction = m.time;
+      }}
+      onPointerUp={(event) => release(event.pointerId)}
+      onPointerCancel={(event) => release(event.pointerId)}
+      onLostPointerCapture={(event) => release(event.pointerId)}
+      onKeyDown={(event) => {
+        if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+          event.preventDefault();
+          nudge(event.key === "ArrowRight" ? 1 : -1);
+        }
+        if (auto && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+          event.preventDefault();
+          motion.current.pitchVelocity += event.key === "ArrowDown" ? 0.4 : -0.4;
+          motion.current.lastInteraction = motion.current.time;
+        }
+        if (event.key === " ") {
+          event.preventDefault();
+          if (!event.repeat) toggleMotion();
+        }
+      }}
+    >
+            {sceneMounted && <SceneBoundary><Suspense fallback={null}><PlanetScene3 motion={motion} active={visible && tabVisible && !story} auto={auto} reduced={reduced} prototype={prototype} onReady={setReady} /></Suspense></SceneBoundary>}
+            {!ready && <div className="loading" role="status"><span />Your little world is taking shape…</div>}
+          </div>
+        </div>
+        <div className={`planet-caption ${dragging ? "is-dragging" : ""}`} aria-hidden="true"><p>{!auto ? "Press Start" : dragging ? "Good things." : "Drag to turn"}<br />{!auto ? "to keep moving" : dragging ? "On their way." : "the world"}</p><svg viewBox="0 0 180 165" fill="none"><path d="M161 148C137 82 103 39 28 14m0 0 6 16m-6-16 19-2" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round" /></svg></div>
+        <p id="planet-instructions" className="sr-only">Drag in any direction, or use the arrow keys, to rotate the 3D planet. Space pauses the planet and lets the courier wave; press again to start. Rotation is locked while paused. On touch screens, swipe outside the planet to scroll the page.</p>
+        <div className="cloud-bank" aria-hidden="true"><i /><i /><i /><i /><i /></div>
+      </section></main>
+      <footer className="site-footer">
+        <p className="footer-left">Small parcels<br />Big possibilities</p>
+        <button className="motion-button" onClick={toggleMotion} aria-pressed={!auto} aria-label={auto ? "Pause and greet the courier" : "Start moving"}>{auto ? <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7 5v10m6-10v10" stroke="currentColor" strokeWidth="1.5" /></svg> : <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m7 4 8 6-8 6Z" fill="currentColor" /></svg>}<span>{auto ? "Pause" : "Start"}</span></button>
+        <p className="footer-right">Crafted by <a href="https://github.com/divyanshu-builds-ui/3D-orbit-delivery" target="_blank" rel="noopener noreferrer" style={{ color: "inherit", textDecoration: "underline", textUnderlineOffset: "3px" }}>Divyanshu</a><br />A little closer to you</p>
+      </footer>
+      {prototype && <aside className="prototype-label">Movement prototype <a href="./">View finished scene ↗</a></aside>}
+      {story && <StoryDialog story={story} onClose={() => { setStory(null); if (!auto) toggleMotion(); }} />}
+    </div>
   </div>;
 }
 function StoryDialog({ story, onClose }) {
@@ -1192,11 +1278,14 @@ var css = `@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,op
 .orbit-delivery .cloud-bank{opacity:var(--orbit-cloud)}
 .orbit-delivery .about-dialog{background:var(--orbit-bg);color:var(--orbit-ink)}
 .orbit-delivery .wordmark{color:var(--orbit-ink)}
-.orbit-delivery h1{font-family:inherit}
-.orbit-delivery button:disabled{opacity:1}
+.orbit-delivery .header-actions{display:flex;align-items:center;gap:10px}
+.orbit-delivery .header-icon-btn{width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:50%;color:var(--orbit-nav);background:transparent;transition:all .2s;border:1px solid transparent;cursor:pointer}
+.orbit-delivery .header-icon-btn:hover{color:var(--orbit-accent);background:#0000000a;border-color:#00000010}
+:is(.dark,[data-theme="dark"]) .orbit-delivery .header-icon-btn:hover{background:#ffffff10;border-color:#ffffff15}
+.orbit-delivery .header-icon-btn.is-active{color:var(--orbit-accent);background:#4673eb18}
 `;
-function OrbitDeliveryHero({ theme = "auto", assetBaseUrl = "/" }) {
-  return <AssetBaseContext.Provider value={assetBaseUrl.replace(/\/$/, "") + "/"}><div className="orbit-delivery" data-theme={theme}><style>{css}</style><App /></div></AssetBaseContext.Provider>;
+function OrbitDeliveryHero({ theme = "light", assetBaseUrl = "/" }) {
+  return <AssetBaseContext.Provider value={assetBaseUrl.replace(/\/$/, "") + "/"}><style>{css}</style><App initialTheme={theme} /></AssetBaseContext.Provider>;
 }
 export {
   OrbitDeliveryHero as default
