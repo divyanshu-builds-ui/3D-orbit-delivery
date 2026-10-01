@@ -14,7 +14,6 @@ var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, { get: all[name], enumerable: true });
 };
-import { audio } from "@/src/utils/audio";
 
 // src/motion.ts
 function stepPlanet(m, dt, auto, reduced, autoRoll = -0.032) {
@@ -1059,11 +1058,6 @@ function App() {
   const toggleMotion = () => {
     const next = !auto;
     setAuto(next);
-    if (!next) {
-      audio.playChime();
-    } else {
-      audio.playPop();
-    }
     const m = motion.current;
     m.dragging = false;
     if (drag.current && interaction.current?.hasPointerCapture(drag.current.id)) interaction.current.releasePointerCapture(drag.current.id);
@@ -1074,11 +1068,6 @@ function App() {
     m.pitchTarget = m.pitchAngle;
     if (next) m.lastInteraction = m.time - 4;
   };
-  useEffect6(() => {
-    const handleRemoteGreeting = () => toggleMotion();
-    window.addEventListener('orbit:trigger-greeting', handleRemoteGreeting);
-    return () => window.removeEventListener('orbit:trigger-greeting', handleRemoteGreeting);
-  }, [auto]);
   const nudge = (direction) => {
     if (!auto) return;
     motion.current.planetVelocity += direction * 0.65;
@@ -1093,14 +1082,14 @@ function App() {
     <header className="site-header">
       <a href="./" className="wordmark" aria-label="Orbit Delivery home"><svg viewBox="0 0 38 38" aria-hidden="true"><defs><radialGradient id="logo-light" cx="30%" cy="20%"><stop stopColor="#7d9efa" /><stop offset="1" stopColor="#4674e9" /></radialGradient></defs><circle cx="23" cy="15" r="14" fill="url(#logo-light)" /><circle cx="10" cy="27" r="8" fill="#6389f0" /><circle cx="15" cy="8" r="3.5" fill="#b2c7ff" opacity=".45" /></svg><span className="brand-type">orbit<small>delivery</small></span></a>
       <nav aria-label="Main navigation"><button onClick={explore}>Delivery</button>{["How it works", "For business", "Our story"].map((item) => <button key={item} onClick={() => setStory(item)}>{item}</button>)}</nav>
-      <button className="header-cta" onClick={toggleMotion} title="Meet & greet your courier">Meet your courier</button>
+      <button className="header-cta" disabled>Meet your courier</button>
     </header>
     <main><section className="hero" aria-labelledby="hero-title">
       <div className="hero-copy">
         <p className="eyebrow">Good things, on their way</p>
         <h1 id="hero-title">Good things.<br />Delivered<br /><em>with care.</em></h1>
         <p className="hero-description">Parcels, packages, and a little peace of mind.<br className="desktop-break" /> From your doorstep to theirs.</p>
-        <button className="explore-button" onClick={toggleMotion} title="Meet & greet your courier">Meet your courier <Arrow /></button>
+        <button className="explore-button" disabled>Meet your courier <Arrow /></button>
       </div>
       <div className="visual-column">
         <div
@@ -1126,9 +1115,6 @@ function App() {
     onPointerMove={(event) => {
       if (!auto || drag.current?.id !== event.pointerId) return;
       const dx = event.clientX - drag.current.x, dy = event.clientY - drag.current.y;
-      if (Math.hypot(dx, dy) > 10) {
-        audio.playWhoosh(Math.min(2.5, Math.hypot(dx, dy) * 0.04));
-      }
       const sensitivity = 5 / Math.max(360, event.currentTarget.clientWidth);
       const m = motion.current;
       m.dragTarget = Math.max(m.planetAngle - 0.5, Math.min(m.planetAngle + 0.5, m.dragTarget + dx * sensitivity));
@@ -1199,8 +1185,6 @@ var css = `@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,op
 
 .orbit-delivery{width:100%;isolation:isolate;--orbit-bg:radial-gradient(ellipse at 6% 15%,#fffefa 0%,#fbfcff 38%,#f0f6ff 100%);--orbit-ink:#080e2b;--orbit-muted:#7a87aa;--orbit-nav:#4d5a83;--orbit-accent:#4a72e7;--orbit-cloud:1;color:var(--orbit-ink)}
 :is(.dark,[data-theme="dark"]) .orbit-delivery:not([data-theme="light"]),.orbit-delivery[data-theme="dark"]{--orbit-bg:radial-gradient(ellipse at 6% 15%,#151e32 0%,#0d1526 50%,#101e38 100%);--orbit-ink:#f3f6ff;--orbit-muted:#b0bed9;--orbit-nav:#becbe6;--orbit-accent:#8daaff;--orbit-cloud:.14;color-scheme:dark}
-.orbit-delivery[data-theme="cyber"]{--orbit-bg:radial-gradient(ellipse at 15% 20%,#190b30 0%,#090417 48%,#05081c 100%);--orbit-ink:#f8faff;--orbit-muted:#a78bfa;--orbit-nav:#c4b5fd;--orbit-accent:#38bdf8;--orbit-cloud:.18;color-scheme:dark}
-.orbit-delivery[data-theme="cyber"] .site-header .header-cta,.orbit-delivery[data-theme="cyber"] .explore-button{background:linear-gradient(135deg,#6366f1,#8b5cf6,#06b6d4)!important;box-shadow:0 0 25px rgba(139,92,246,0.5)!important}
 .orbit-delivery .page{background:var(--orbit-bg);color:var(--orbit-ink)}
 .orbit-delivery .hero-description,.orbit-delivery .about-dialog p{color:var(--orbit-muted)}
 .orbit-delivery .site-header nav button{color:var(--orbit-nav)}
