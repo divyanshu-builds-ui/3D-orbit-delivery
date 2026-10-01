@@ -25,21 +25,23 @@ function stepPlanet(m, dt, auto, reduced, autoRoll = -0.032) {
     m.pitchTarget = m.pitchAngle;
     return;
   }
+  const warpMult = m.warp || 1;
   if (m.dragging) {
     const acceleration = 90 * (m.dragTarget - m.planetAngle) - 18 * m.planetVelocity;
     m.planetVelocity += acceleration * dt;
   } else {
-    const desired = auto && !reduced && m.time - m.lastInteraction > 3.5 ? autoRoll : 0;
+    const desired = auto && !reduced && m.time - m.lastInteraction > 3.5 ? autoRoll * warpMult : 0;
     m.planetVelocity = damp(m.planetVelocity, desired, reduced ? 12 : 5, dt);
   }
-  m.planetVelocity = clamp(m.planetVelocity, -1.15, 1.15);
+  m.planetVelocity = clamp(m.planetVelocity, -1.15 * warpMult, 1.15 * warpMult);
   m.planetAngle += m.planetVelocity * dt;
 }
 function stepRunner(m, dt, screenTopLocal, reduced) {
+  const warpMult = m.warp || 1;
   m.characterTarget += Math.atan2(Math.sin(screenTopLocal - m.characterTarget), Math.cos(screenTopLocal - m.characterTarget));
   const error = m.characterTarget - m.characterAngle;
-  const stiffness = reduced ? 110 : 48;
-  const damping = reduced ? 21 : 11;
+  const stiffness = (reduced ? 110 : 48) * warpMult;
+  const damping = (reduced ? 21 : 11) * Math.sqrt(warpMult);
   m.characterVelocity += (stiffness * error - damping * m.characterVelocity) * dt;
   m.characterAngle += m.characterVelocity * dt;
   const speed = Math.abs(m.characterVelocity);
@@ -73,7 +75,9 @@ var init_motion = __esm({
       lastInteraction: 0,
       pitchAngle: 0,
       pitchVelocity: 0,
-      pitchTarget: 0
+      pitchTarget: 0,
+      warp: 1,
+      sound: false
     });
   }
 });
@@ -621,11 +625,51 @@ function makeIdle(scene) {
   });
   return new AnimationClip2("Courier_Idle", 3, tracks);
 }
+let sharedAudioCtx = null;
+function getSharedAudioContext() {
+  try {
+    if (typeof window === "undefined") return null;
+    if (!sharedAudioCtx) {
+      const CtxClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (CtxClass) sharedAudioCtx = new CtxClass();
+    }
+    if (sharedAudioCtx && sharedAudioCtx.state === "suspended") {
+      sharedAudioCtx.resume().catch(() => {});
+    }
+    return sharedAudioCtx;
+  } catch {
+    return null;
+  }
+}
+function playCourierStep(activity = 1) {
+  try {
+    const ctx = getSharedAudioContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const filter = ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.setValueAtTime(280, now);
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(130, now);
+    osc.frequency.exponentialRampToValueAtTime(32, now + 0.042);
+    const vol = Math.min(0.045, 0.024 * Math.max(0.4, activity));
+    gain.gain.setValueAtTime(vol, now);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.048);
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.052);
+  } catch {}
+}
 function Courier({ motion, paused, reduced, onReady }) {
   const base = useContext2(AssetBaseContext);
   const facing = useRef(null), lean = useRef(null);
   const greetingTurn = useRef(false);
   const turnVelocity = useRef(0);
+  const lastStepPhase = useRef(0);
   const [asset, setAsset] = useState2(null);
   const [error, setError] = useState2(null);
   useEffect2(() => {
@@ -728,6 +772,13 @@ function Courier({ motion, paused, reduced, onReady }) {
     asset.scene.updateWorldMatrix(true, true);
     asset.greeting.apply(reduced);
     asset.bag.update(dt, activity, m.phase, turnVelocity.current, reduced, lean.current.rotation.x);
+    if (m.sound && activity > 0.15 && !paused) {
+      const stepIndex = Math.floor(m.phase / Math.PI);
+      if (stepIndex !== lastStepPhase.current) {
+        lastStepPhase.current = stepIndex;
+        playCourierStep(activity);
+      }
+    }
   });
   if (error) throw error;
   return <group ref={facing} rotation={[0, Math.PI / 2, 0]}><group ref={lean}><group scale={MODEL_SCALE}>{asset && <primitive object={asset.scene} dispose={null} />}</group></group></group>;
@@ -1005,36 +1056,40 @@ var stories = {
 };
 function playSubtlePop() {
   try {
-    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const ctx = getSharedAudioContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
-    osc.frequency.setValueAtTime(540, ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(840, ctx.currentTime + 0.04);
-    gain.gain.setValueAtTime(0.04, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.05);
+    osc.frequency.setValueAtTime(540, now);
+    osc.frequency.exponentialRampToValueAtTime(840, now + 0.04);
+    gain.gain.setValueAtTime(0.04, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
     osc.connect(gain);
     gain.connect(ctx.destination);
-    osc.start();
-    osc.stop(ctx.currentTime + 0.06);
+    osc.start(now);
+    osc.stop(now + 0.06);
   } catch {}
 }
 function playSubtleWhoosh(speed = 1) {
   try {
-    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const ctx = getSharedAudioContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     const filter = ctx.createBiquadFilter();
     filter.type = "bandpass";
-    filter.frequency.setValueAtTime(280, ctx.currentTime);
+    filter.frequency.setValueAtTime(280, now);
     osc.type = "sine";
-    osc.frequency.setValueAtTime(140, ctx.currentTime);
-    gain.gain.setValueAtTime(0.018 * Math.min(speed, 2), ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.16);
+    osc.frequency.setValueAtTime(140, now);
+    gain.gain.setValueAtTime(0.018 * Math.min(speed, 2), now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
     osc.connect(filter);
     filter.connect(gain);
     gain.connect(ctx.destination);
-    osc.start();
-    osc.stop(ctx.currentTime + 0.18);
+    osc.start(now);
+    osc.stop(now + 0.18);
   } catch {}
 }
 function App({ initialTheme = "light" }) {
@@ -1043,12 +1098,15 @@ function App({ initialTheme = "light" }) {
   const drag = useRef5(null);
   const [theme, setTheme] = useState4(initialTheme);
   const [soundOn, setSoundOn] = useState4(false);
+  const [warp, setWarp] = useState4(false);
   const [visible, setVisible] = useState4(true), [tabVisible, setTabVisible] = useState4(true);
   const [reduced, setReduced] = useState4(false);
   const [sceneMounted, setSceneMounted] = useState4(false);
   const [auto, setAuto] = useState4(true), [dragging, setDragging] = useState4(false), [ready, setReady] = useState4(false);
   const [story, setStory] = useState4(null);
   const [prototype, setPrototype] = useState4(false);
+  motion.current.sound = soundOn;
+  motion.current.warp = warp ? 2.4 : 1;
   useEffect6(() => {
     setTabVisible(!document.hidden);
     setPrototype(new URLSearchParams(location.search).has("prototype"));
@@ -1106,6 +1164,15 @@ function App({ initialTheme = "light" }) {
     m.pitchTarget = m.pitchAngle;
     if (next) m.lastInteraction = m.time - 4;
   };
+  const toggleWarp = () => {
+    const next = !warp;
+    setWarp(next);
+    motion.current.warp = next ? 2.4 : 1;
+    if (soundOn) {
+      if (next) playSubtleWhoosh(2.5);
+      else playSubtlePop();
+    }
+  };
   const meetCourier = () => {
     if (soundOn) playSubtlePop();
     setStory("Meet your courier");
@@ -1113,7 +1180,8 @@ function App({ initialTheme = "light" }) {
   };
   const nudge = (direction) => {
     if (!auto) return;
-    motion.current.planetVelocity += direction * 0.65;
+    const warpMult = motion.current.warp || 1;
+    motion.current.planetVelocity += direction * 0.65 * warpMult;
     motion.current.lastInteraction = motion.current.time;
   };
   const explore = () => {
@@ -1128,6 +1196,31 @@ function App({ initialTheme = "light" }) {
         <nav aria-label="Main navigation"><button onClick={explore}>Delivery</button>{["How it works", "For business", "Our story"].map((item) => <button key={item} onClick={() => setStory(item)}>{item}</button>)}</nav>
         <div className="header-actions">
           <button
+            className={`header-warp-btn ${warp ? "is-active" : ""}`}
+            onClick={toggleWarp}
+            title={warp ? "Normal speed (1x)" : "Warp speed (2.4x sprint)"}
+          >
+            <span>⚡</span>
+            <span>{warp ? "Warp 2.4x" : "Warp"}</span>
+          </button>
+          <button
+            className={`header-icon-btn ${soundOn ? "is-active" : ""}`}
+            onClick={() => {
+              const next = !soundOn;
+              setSoundOn(next);
+              motion.current.sound = next;
+              if (next) playSubtlePop();
+            }}
+            aria-label={soundOn ? "Mute audio" : "Enable atmospheric 3D audio"}
+            title={soundOn ? "Mute audio (footsteps & whoosh)" : "Enable audio (footsteps & whoosh)"}
+          >
+            {soundOn ? (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="18" height="18"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+            ) : (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="18" height="18"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
+            )}
+          </button>
+          <button
             className="header-icon-btn"
             onClick={() => {
               const next = theme === "dark" ? "light" : "dark";
@@ -1141,22 +1234,6 @@ function App({ initialTheme = "light" }) {
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="18" height="18"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
             ) : (
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="18" height="18"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-            )}
-          </button>
-          <button
-            className={`header-icon-btn ${soundOn ? "is-active" : ""}`}
-            onClick={() => {
-              const next = !soundOn;
-              setSoundOn(next);
-              if (next) playSubtlePop();
-            }}
-            aria-label={soundOn ? "Mute audio" : "Enable atmospheric 3D audio"}
-            title={soundOn ? "Mute audio" : "Enable atmospheric 3D audio"}
-          >
-            {soundOn ? (
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="18" height="18"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
-            ) : (
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="18" height="18"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
             )}
           </button>
           <button className="header-cta" onClick={meetCourier}>Meet your courier</button>
@@ -1233,8 +1310,24 @@ function App({ initialTheme = "light" }) {
       </section></main>
       <footer className="site-footer">
         <p className="footer-left">Small parcels<br />Big possibilities</p>
-        <button className="motion-button" onClick={toggleMotion} aria-pressed={!auto} aria-label={auto ? "Pause and greet the courier" : "Start moving"}>{auto ? <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7 5v10m6-10v10" stroke="currentColor" strokeWidth="1.5" /></svg> : <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m7 4 8 6-8 6Z" fill="currentColor" /></svg>}<span>{auto ? "Pause" : "Start"}</span></button>
-        <p className="footer-right">Crafted by <a href="https://github.com/divyanshu-builds-ui/3D-orbit-delivery" target="_blank" rel="noopener noreferrer" style={{ color: "inherit", textDecoration: "underline", textUnderlineOffset: "3px" }}>Divyanshu</a><br />A little closer to you</p>
+        <button className="motion-button" onClick={toggleMotion} aria-pressed={!auto} aria-label={auto ? "Pause and greet the courier" : "Start moving"}>
+          {auto ? <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7 5v10m6-10v10" stroke="currentColor" strokeWidth="1.5" /></svg> : <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m7 4 8 6-8 6Z" fill="currentColor" /></svg>}
+          <span>{auto ? "Pause" : "Start"}</span>
+        </button>
+        <div className="footer-right footer-social-block">
+          <p className="footer-credits">Crafted by <a href="https://instagram.com/divyanshu.builds" target="_blank" rel="noopener noreferrer" className="footer-creator-link">Divyanshu</a></p>
+          <div className="footer-social-links">
+            <a href="https://instagram.com/divyanshu.builds" target="_blank" rel="noopener noreferrer" className="footer-social-link" title="Instagram @divyanshu.builds">
+              <svg viewBox="0 0 24 24" fill="currentColor" width="12" height="12"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/></svg>
+              <span>Instagram</span>
+            </a>
+            <span className="dot">•</span>
+            <a href="https://github.com/divyanshu-builds-ui/3D-orbit-delivery" target="_blank" rel="noopener noreferrer" className="footer-social-link" title="GitHub Repository">
+              <svg viewBox="0 0 24 24" fill="currentColor" width="12" height="12"><path fillRule="evenodd" clipRule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
+              <span>GitHub</span>
+            </a>
+          </div>
+        </div>
       </footer>
       {prototype && <aside className="prototype-label">Movement prototype <a href="./">View finished scene ↗</a></aside>}
       {story && <StoryDialog story={story} onClose={() => { setStory(null); if (!auto) toggleMotion(); }} />}
@@ -1260,7 +1353,7 @@ var css = `@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,op
 .orbit-delivery *{box-sizing:border-box}.orbit-delivery{margin:0}.orbit-delivery button,.orbit-delivery a{-webkit-tap-highlight-color:transparent}.orbit-delivery button{font:inherit;color:inherit;cursor:pointer;border:0;background:none}.orbit-delivery button:disabled{cursor:default;opacity:.55}.orbit-delivery button:focus-visible,.orbit-delivery a:focus-visible{outline:2px solid #4776ee;outline-offset:6px}.orbit-delivery a{color:inherit;text-decoration:none}.orbit-delivery svg{display:block}.orbit-delivery button svg{width:22px;height:22px}.orbit-delivery .page{height:100svh;min-height:760px;position:relative;overflow:hidden;background:radial-gradient(ellipse at 6% 15%,#fffefa 0%,#fbfcff 38%,#f0f6ff 100%);display:flex;flex-direction:column}.orbit-delivery .site-header{height:104px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 6.5%;position:relative;z-index:5}.orbit-delivery .wordmark{display:flex;align-items:center;gap:13px;font-size:32px;font-weight:600;letter-spacing:-1.5px}.orbit-delivery .wordmark>svg{width:35px;height:35px}.orbit-delivery .site-header nav{position:absolute;left:50%;transform:translateX(-50%);display:flex;gap:49px;align-items:center}.orbit-delivery .site-header nav button{font-size:15px;color:#4d5a83;padding:12px 0;transition:color .2s}.orbit-delivery .site-header nav button:hover{color:#4574ec}.orbit-delivery .header-cta{background:#4673eb;color:white;border-radius:23px;padding:15px 27px;font-size:15px;box-shadow:inset 0 1px 0 #ffffff26;transition:background .2s}.orbit-delivery .header-cta:not(:disabled):hover,.orbit-delivery .explore-button:not(:disabled):hover{background:#345fda}.orbit-delivery main{flex:1;min-height:0;display:flex}.orbit-delivery .hero{width:100%;position:relative}.orbit-delivery .hero-copy{position:relative;z-index:3;margin-left:6.5%;padding-top:clamp(76px,12.2vh,145px);width:45%;pointer-events:none}.orbit-delivery .hero-copy button{pointer-events:auto}.orbit-delivery .eyebrow{text-transform:uppercase;letter-spacing:.36em;font-size:12px;font-weight:500;color:#7a94df;margin:0 0 21px}.orbit-delivery h1{font-size:clamp(66px,5.55vw,100px);font-weight:550;letter-spacing:-.064em;line-height:1.03;margin:0 0 26px}.orbit-delivery h1 em{font-family:'Libre Caslon Text','Orbit Libre Caslon',Georgia,serif;font-size:1.12em;font-weight:400;letter-spacing:-.035em;color:#4a72e7;line-height:.7}.orbit-delivery .hero-description{color:#7a87aa;font-size:clamp(16px,1.25vw,21px);line-height:1.45;letter-spacing:-.3px;margin:0 0 30px}.orbit-delivery .explore-button{display:inline-flex;align-items:center;justify-content:center;gap:9px;min-width:183px;padding:17px 29px;border-radius:32px;background:#4773ec;color:white;font-size:16px;min-height:55px;box-shadow:inset 0 1px 0 #ffffff30;transition:background .2s,transform .2s}.orbit-delivery .explore-button:not(:disabled):hover{transform:translateY(-2px)}.orbit-delivery .explore-button:not(:disabled):active{transform:translateY(0)}.orbit-delivery .visual-column{position:absolute;right:-5%;top:0;width:76%;height:calc(100% + 12px);z-index:1}.orbit-delivery .planet-stage{height:100%;width:100%;position:relative;cursor:grab;touch-action:none;user-select:none;outline:none}.orbit-delivery .planet-stage:focus-visible{outline:1px dashed #adc1ef;outline-offset:-15px;border-radius:36px}.orbit-delivery .planet-stage.dragging{cursor:grabbing}.orbit-delivery .planet-caption{position:absolute;right:6.2%;top:17%;z-index:3;width:160px;pointer-events:none;color:#a4b5d8;transition:opacity .2s}.orbit-delivery .planet-caption p{font-size:15px;line-height:1.35;font-style:italic;text-align:right;margin:0}.orbit-delivery .planet-caption svg{width:160px;height:149px;margin-top:-17px;margin-left:-32px}.orbit-delivery .planet-caption.is-dragging{opacity:.6}.orbit-delivery .cloud-bank{position:absolute;z-index:2;inset:auto -12% -90px 24%;height:250px;pointer-events:none;filter:blur(17px);opacity:.95}.orbit-delivery .cloud-bank i{position:absolute;bottom:0;background:radial-gradient(ellipse at 42% 34%,#fffdfb 27%,#f3f7ff 59%,#e5edfc88 75%,transparent 80%);border-radius:50%}.orbit-delivery .cloud-bank i:nth-child(1){width:390px;height:200px;left:0;bottom:-28px;transform:rotate(-25deg)}.orbit-delivery .cloud-bank i:nth-child(2){width:265px;height:195px;left:14%;bottom:32px}.orbit-delivery .cloud-bank i:nth-child(3){width:270px;height:170px;left:29%;bottom:-2px}.orbit-delivery .cloud-bank i:nth-child(4){width:350px;height:200px;right:7%;bottom:-20px}.orbit-delivery .cloud-bank i:nth-child(5){width:280px;height:215px;right:-2%;bottom:70px}.orbit-delivery .site-footer{position:absolute;bottom:43px;left:6.5%;right:5.1%;z-index:4;display:flex;align-items:flex-end;justify-content:space-between;pointer-events:none}.orbit-delivery .site-footer p{margin:0;text-transform:uppercase;font-size:10px;letter-spacing:.25em;line-height:1.8;color:#94a7d1}.orbit-delivery .footer-left::before{content:'';display:block;width:25px;height:1px;background:#aebfdf;margin-bottom:14px}.orbit-delivery .footer-right{text-align:right}.orbit-delivery .motion-button{display:flex;gap:7px;align-items:center;color:#7b92be;pointer-events:auto;font-size:10px;letter-spacing:.02em;opacity:.8;padding:8px}.orbit-delivery .motion-button:hover{opacity:1}.orbit-delivery .motion-button svg{width:15px;height:15px}.orbit-delivery .loading{position:absolute;top:42%;left:25%;right:20%;display:flex;align-items:center;justify-content:center;gap:12px;color:#8197c4;font-size:12px;pointer-events:none}.orbit-delivery .loading>span{width:17px;height:17px;border:1px solid #d8e3ff;border-top-color:#648cf0;border-radius:50%;animation:loading 1.2s linear infinite}@keyframes loading{to{transform:rotate(360deg)}}.orbit-delivery .scene-fallback{position:absolute;inset:35% 20%;font-size:15px;text-align:center;color:#7588b4;z-index:5}.orbit-delivery .scene-fallback button{background:#4773ec;border-radius:20px;color:white;padding:10px 20px}.orbit-delivery .about-dialog{border:1px solid #dce5fa;border-radius:22px;padding:48px;max-width:510px;width:calc(100% - 32px);background:#f9fbff;color:#080e2b;box-shadow:0 25px 120px #183c7326}.orbit-delivery .about-dialog::backdrop{background:#1a315c33;backdrop-filter:blur(8px)}.orbit-delivery .about-dialog h2{font-size:36px;font-weight:500;letter-spacing:-1.6px;line-height:1.15;margin:26px 0 22px}.orbit-delivery .about-dialog p{font-size:15px;line-height:1.75;color:#7a87aa}.orbit-delivery .about-dialog .explore-button{margin-top:16px;font-size:14px}.orbit-delivery .close-dialog{position:absolute;right:20px;top:10px;font-size:30px;color:#8194bf}.orbit-delivery .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.orbit-delivery .prototype-label{position:fixed;bottom:12px;left:12px;z-index:8;background:#fff;border:1px solid #d5e0f6;border-radius:6px;padding:12px;font:11px monospace}.orbit-delivery .prototype-label a{margin-left:18px;text-decoration:underline}
 @media(min-width:1800px){.orbit-delivery .hero-copy{padding-top:15vh}.orbit-delivery .page{min-height:950px}}
 @media(max-width:1150px){.orbit-delivery .site-header{height:90px;padding:0 5%}.orbit-delivery .site-header nav{gap:28px}.orbit-delivery .site-header nav button{font-size:13px}.orbit-delivery .wordmark{font-size:29px}.orbit-delivery .header-cta{font-size:13px;padding:13px 21px}.orbit-delivery .hero-copy{margin-left:5%;padding-top:100px;width:48%}.orbit-delivery h1{font-size:65px}.orbit-delivery .hero-description{font-size:15px;max-width:370px}.orbit-delivery .planet-caption{right:4%;top:18%;width:115px}.orbit-delivery .planet-caption p{font-size:12px}.orbit-delivery .planet-caption svg{width:130px;margin-left:-24px}.orbit-delivery .site-footer{left:5%}.orbit-delivery .page{min-height:760px}.orbit-delivery .explore-button{font-size:15px;min-width:168px}}
-@media(max-width:759px){.orbit-delivery .page{height:auto;min-height:100svh}.orbit-delivery .site-header{height:90px;padding:0 25px}.orbit-delivery .site-header nav{display:none}.orbit-delivery .wordmark{font-size:28px;gap:9px}.orbit-delivery .wordmark>svg{width:31px;height:31px}.orbit-delivery .header-cta{padding:12px 19px;border-radius:20px;font-size:12px}.orbit-delivery main{display:block}.orbit-delivery .hero{display:flex;flex-direction:column}.orbit-delivery .hero-copy{width:calc(100% - 50px);margin:0 25px;padding-top:32px;pointer-events:auto}.orbit-delivery .eyebrow{font-size:9px;letter-spacing:.33em;margin-bottom:18px}.orbit-delivery h1{font-size:clamp(54px,12vw,80px);margin-bottom:23px;line-height:1.025}.orbit-delivery .hero-description{font-size:15px;line-height:1.6;max-width:340px;margin-bottom:24px}.orbit-delivery .desktop-break{display:none}.orbit-delivery .explore-button{padding:15px 24px;min-height:51px;min-width:163px;font-size:14px}.orbit-delivery .visual-column{position:relative;width:134%;right:auto;left:-17%;height:clamp(445px,112vw,670px);margin-top:-8px}.orbit-delivery .planet-caption{top:auto;bottom:290px;right:18px;width:96px}.orbit-delivery .planet-caption p{font-size:11px}.orbit-delivery .planet-caption svg{width:92px;height:94px;margin-left:-13px;margin-top:-3px}.orbit-delivery .cloud-bank{left:-20%;right:-20%;height:185px;bottom:-50px;filter:blur(14px)}.orbit-delivery .cloud-bank i:nth-child(1){width:210px;height:140px;left:-10%;bottom:12px}.orbit-delivery .cloud-bank i:nth-child(2){width:170px;height:150px;left:10%;bottom:-32px}.orbit-delivery .cloud-bank i:nth-child(3){width:180px;height:130px;left:35%;bottom:-35px}.orbit-delivery .cloud-bank i:nth-child(4){width:210px;height:160px;right:-5%;bottom:-5px}.orbit-delivery .cloud-bank i:nth-child(5){width:120px;height:120px;right:8%;bottom:0}.orbit-delivery .site-footer{bottom:23px;left:25px;right:25px}.orbit-delivery .site-footer p{font-size:8px;letter-spacing:.18em}.orbit-delivery .footer-left::before{margin-bottom:9px;width:20px}.orbit-delivery .motion-button{font-size:0;gap:0;padding:8px}.orbit-delivery .motion-button svg{width:18px;height:18px}.orbit-delivery .about-dialog{padding:35px}.orbit-delivery .about-dialog h2{font-size:31px}.orbit-delivery .prototype-label{font-size:9px;padding:8px}}
+@media(max-width:759px){.orbit-delivery .page{height:auto;min-height:100svh}.orbit-delivery .site-header{height:90px;padding:0 25px}.orbit-delivery .site-header nav{display:none}.orbit-delivery .wordmark{font-size:28px;gap:9px}.orbit-delivery .wordmark>svg{width:31px;height:31px}.orbit-delivery .header-actions{gap:6px}.orbit-delivery .header-warp-btn{height:34px;padding:0 10px;font-size:11px}.orbit-delivery .header-icon-btn{width:34px;height:34px}.orbit-delivery .header-cta{display:none}.orbit-delivery main{display:block}.orbit-delivery .hero{display:flex;flex-direction:column}.orbit-delivery .hero-copy{width:calc(100% - 50px);margin:0 25px;padding-top:32px;pointer-events:auto}.orbit-delivery .eyebrow{font-size:9px;letter-spacing:.33em;margin-bottom:18px}.orbit-delivery h1{font-size:clamp(54px,12vw,80px);margin-bottom:23px;line-height:1.025}.orbit-delivery .hero-description{font-size:15px;line-height:1.6;max-width:340px;margin-bottom:24px}.orbit-delivery .desktop-break{display:none}.orbit-delivery .explore-button{padding:15px 24px;min-height:51px;min-width:163px;font-size:14px}.orbit-delivery .visual-column{position:relative;width:134%;right:auto;left:-17%;height:clamp(445px,112vw,670px);margin-top:-8px}.orbit-delivery .planet-caption{top:auto;bottom:290px;right:18px;width:96px}.orbit-delivery .planet-caption p{font-size:11px}.orbit-delivery .planet-caption svg{width:92px;height:94px;margin-left:-13px;margin-top:-3px}.orbit-delivery .cloud-bank{left:-20%;right:-20%;height:185px;bottom:-50px;filter:blur(14px)}.orbit-delivery .cloud-bank i:nth-child(1){width:210px;height:140px;left:-10%;bottom:12px}.orbit-delivery .cloud-bank i:nth-child(2){width:170px;height:150px;left:10%;bottom:-32px}.orbit-delivery .cloud-bank i:nth-child(3){width:180px;height:130px;left:35%;bottom:-35px}.orbit-delivery .cloud-bank i:nth-child(4){width:210px;height:160px;right:-5%;bottom:-5px}.orbit-delivery .cloud-bank i:nth-child(5){width:120px;height:120px;right:8%;bottom:0}.orbit-delivery .site-footer{bottom:23px;left:25px;right:25px}.orbit-delivery .site-footer p{font-size:8px;letter-spacing:.18em}.orbit-delivery .footer-left::before{margin-bottom:9px;width:20px}.orbit-delivery .footer-social-block{align-items:flex-end}.orbit-delivery .footer-credits{font-size:8px;letter-spacing:.15em}.orbit-delivery .footer-social-links{font-size:10px;gap:6px}.orbit-delivery .motion-button{font-size:0;gap:0;padding:8px}.orbit-delivery .motion-button svg{width:18px;height:18px}.orbit-delivery .about-dialog{padding:35px}.orbit-delivery .about-dialog h2{font-size:31px}.orbit-delivery .prototype-label{font-size:9px;padding:8px}}
 @media(prefers-reduced-motion:reduce){.orbit-delivery *,.orbit-delivery *::before,.orbit-delivery *::after{scroll-behavior:auto!important;transition:none!important;animation:none!important}.orbit-delivery .explore-button:not(:disabled):hover{transform:none}}
 
 /* Delivery identity keeps the supplied blue-and-white art direction. */
@@ -1279,10 +1372,25 @@ var css = `@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,op
 .orbit-delivery .about-dialog{background:var(--orbit-bg);color:var(--orbit-ink)}
 .orbit-delivery .wordmark{color:var(--orbit-ink)}
 .orbit-delivery .header-actions{display:flex;align-items:center;gap:10px}
-.orbit-delivery .header-icon-btn{width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:50%;color:var(--orbit-nav);background:transparent;transition:all .2s;border:1px solid transparent;cursor:pointer}
-.orbit-delivery .header-icon-btn:hover{color:var(--orbit-accent);background:#0000000a;border-color:#00000010}
-:is(.dark,[data-theme="dark"]) .orbit-delivery .header-icon-btn:hover{background:#ffffff10;border-color:#ffffff15}
-.orbit-delivery .header-icon-btn.is-active{color:var(--orbit-accent);background:#4673eb18}
+.orbit-delivery .header-warp-btn{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;height:38px;padding:0 14px;border-radius:20px;border:1px solid rgba(74,114,231,0.25);color:var(--orbit-ink);background:rgba(255,255,255,0.6);backdrop-filter:blur(8px);cursor:pointer;transition:all .2s;letter-spacing:-0.2px}
+.orbit-delivery .header-warp-btn:hover{border-color:var(--orbit-accent);color:var(--orbit-accent);background:#4673eb12}
+.orbit-delivery .header-warp-btn.is-active{background:linear-gradient(135deg,#f59e0b,#ea580c);color:#ffffff;border-color:transparent;box-shadow:0 0 18px rgba(245,158,11,0.45)}
+:is(.dark,[data-theme="dark"]) .orbit-delivery .header-warp-btn{background:rgba(255,255,255,0.06);border-color:rgba(255,255,255,0.12)}
+:is(.dark,[data-theme="dark"]) .orbit-delivery .header-warp-btn:hover{background:rgba(255,255,255,0.12);border-color:var(--orbit-accent)}
+:is(.dark,[data-theme="dark"]) .orbit-delivery .header-warp-btn.is-active{background:linear-gradient(135deg,#f59e0b,#ea580c);color:#ffffff;border-color:transparent;box-shadow:0 0 20px rgba(245,158,11,0.6)}
+.orbit-delivery .header-icon-btn{width:38px;height:38px;display:flex;align-items:center;justify-content:center;border-radius:50%;color:var(--orbit-nav);background:rgba(255,255,255,0.6);backdrop-filter:blur(8px);transition:all .2s;border:1px solid rgba(74,114,231,0.2);cursor:pointer}
+.orbit-delivery .header-icon-btn:hover{color:var(--orbit-accent);background:#4673eb12;border-color:var(--orbit-accent)}
+:is(.dark,[data-theme="dark"]) .orbit-delivery .header-icon-btn{background:rgba(255,255,255,0.06);border-color:rgba(255,255,255,0.12)}
+:is(.dark,[data-theme="dark"]) .orbit-delivery .header-icon-btn:hover{background:rgba(255,255,255,0.12);border-color:var(--orbit-accent)}
+.orbit-delivery .header-icon-btn.is-active{color:var(--orbit-accent);background:#4673eb18;border-color:var(--orbit-accent);box-shadow:0 0 12px rgba(74,114,231,0.3)}
+.orbit-delivery .footer-social-block{display:flex;flex-direction:column;align-items:flex-end;gap:5px;pointer-events:auto}
+.orbit-delivery .footer-credits{margin:0;font-size:10px;text-transform:uppercase;letter-spacing:.22em;color:#94a7d1}
+.orbit-delivery .footer-creator-link{color:inherit;text-decoration:underline;text-underline-offset:3px;font-weight:600}
+.orbit-delivery .footer-creator-link:hover{color:var(--orbit-accent)}
+.orbit-delivery .footer-social-links{display:flex;align-items:center;gap:10px;font-size:11px}
+.orbit-delivery .footer-social-link{display:inline-flex;align-items:center;gap:5px;color:var(--orbit-accent);text-decoration:none;font-weight:550;letter-spacing:.02em;transition:all .2s}
+.orbit-delivery .footer-social-link:hover{opacity:.8;text-decoration:underline}
+.orbit-delivery .footer-social-links .dot{color:#94a7d1;opacity:.6}
 `;
 function OrbitDeliveryHero({ theme = "light", assetBaseUrl = "/" }) {
   return <AssetBaseContext.Provider value={assetBaseUrl.replace(/\/$/, "") + "/"}><style>{css}</style><App initialTheme={theme} /></AssetBaseContext.Provider>;
