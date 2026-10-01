@@ -641,27 +641,59 @@ function getSharedAudioContext() {
     return null;
   }
 }
+let stepCounter = 0;
 function playCourierStep(activity = 1) {
   try {
     const ctx = getSharedAudioContext();
     if (!ctx) return;
     const now = ctx.currentTime;
+    stepCounter++;
+    const isLeft = stepCounter % 2 === 0;
+
+    // 1. Impact Body (triangle wave gives audible low-mid harmonics on laptops/phones)
     const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    const filter = ctx.createBiquadFilter();
-    filter.type = "lowpass";
-    filter.frequency.setValueAtTime(280, now);
-    osc.type = "sine";
-    osc.frequency.setValueAtTime(130, now);
-    osc.frequency.exponentialRampToValueAtTime(32, now + 0.042);
-    const vol = Math.min(0.045, 0.024 * Math.max(0.4, activity));
-    gain.gain.setValueAtTime(vol, now);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.048);
-    osc.connect(filter);
-    filter.connect(gain);
-    gain.connect(ctx.destination);
+    const oscGain = ctx.createGain();
+    const oscFilter = ctx.createBiquadFilter();
+
+    osc.type = "triangle";
+    const startFreq = isLeft ? 175 : 195;
+    osc.frequency.setValueAtTime(startFreq, now);
+    osc.frequency.exponentialRampToValueAtTime(55, now + 0.045);
+
+    oscFilter.type = "lowpass";
+    oscFilter.frequency.setValueAtTime(isLeft ? 380 : 420, now);
+
+    const baseVol = Math.min(0.18, 0.12 * Math.max(0.5, activity));
+    oscGain.gain.setValueAtTime(baseVol, now);
+    oscGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.055);
+
+    osc.connect(oscFilter);
+    oscFilter.connect(oscGain);
+    oscGain.connect(ctx.destination);
     osc.start(now);
-    osc.stop(now + 0.052);
+    osc.stop(now + 0.06);
+
+    // 2. Crisp Transient Tap (shoe ground-strike texture)
+    const tapOsc = ctx.createOscillator();
+    const tapGain = ctx.createGain();
+    const tapFilter = ctx.createBiquadFilter();
+
+    tapOsc.type = "sine";
+    tapOsc.frequency.setValueAtTime(isLeft ? 520 : 580, now);
+    tapOsc.frequency.exponentialRampToValueAtTime(180, now + 0.025);
+
+    tapFilter.type = "bandpass";
+    tapFilter.frequency.setValueAtTime(isLeft ? 560 : 620, now);
+    tapFilter.Q.setValueAtTime(1.5, now);
+
+    tapGain.gain.setValueAtTime(baseVol * 0.45, now);
+    tapGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.028);
+
+    tapOsc.connect(tapFilter);
+    tapFilter.connect(tapGain);
+    tapGain.connect(ctx.destination);
+    tapOsc.start(now);
+    tapOsc.stop(now + 0.032);
   } catch {}
 }
 function Courier({ motion, paused, reduced, onReady }) {
@@ -1097,7 +1129,7 @@ function App({ initialTheme = "light" }) {
   const interaction = useRef5(null);
   const drag = useRef5(null);
   const [theme, setTheme] = useState4(initialTheme);
-  const [soundOn, setSoundOn] = useState4(false);
+  const [soundOn, setSoundOn] = useState4(true);
   const [warp, setWarp] = useState4(false);
   const [visible, setVisible] = useState4(true), [tabVisible, setTabVisible] = useState4(true);
   const [reduced, setReduced] = useState4(false);
@@ -1107,6 +1139,17 @@ function App({ initialTheme = "light" }) {
   const [prototype, setPrototype] = useState4(false);
   motion.current.sound = soundOn;
   motion.current.warp = warp ? 2.4 : 1;
+  useEffect6(() => {
+    const unlockAudio = () => {
+      getSharedAudioContext();
+    };
+    window.addEventListener("pointerdown", unlockAudio, { once: true });
+    window.addEventListener("keydown", unlockAudio, { once: true });
+    return () => {
+      window.removeEventListener("pointerdown", unlockAudio);
+      window.removeEventListener("keydown", unlockAudio);
+    };
+  }, []);
   useEffect6(() => {
     setTabVisible(!document.hidden);
     setPrototype(new URLSearchParams(location.search).has("prototype"));
